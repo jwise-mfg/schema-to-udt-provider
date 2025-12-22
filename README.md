@@ -11,7 +11,54 @@ An Ignition module that creates UDT definitions from JSON Schema files, with MQT
 - Automatic UDT removal when schemas are deleted (configurable)
 - Supports nested objects and type mapping
 
-## Building
+## Development Environment
+
+### Project Structure
+
+```
+schema-tag-provider/
+├── build.gradle.kts          # Main build configuration
+├── settings.gradle           # Gradle settings
+├── gradle.properties         # Signing configuration (generated, not in git)
+├── gradle.properties.example # Example signing config
+├── common/                   # Shared code (Gateway scope)
+│   └── src/main/java/...
+├── gateway/                  # Gateway-scope module code
+│   └── src/main/java/
+│       └── .../gateway/
+│           ├── SchemaTagProviderGatewayHook.java  # Module entry point
+│           ├── TagProviderManager.java            # Main coordinator
+│           ├── config/        # Configuration loading
+│           ├── mqtt/          # MQTT listener
+│           ├── schema/        # JSON Schema parsing
+│           └── udt/           # UDT building and sync
+└── code-signing/             # Module signing tools
+    ├── README.md             # Signing documentation
+    └── generate-keystore.sh  # Signing file generator
+```
+
+### Code Signing Setup
+
+Ignition modules must be signed. This project includes a helper script to generate self-signed certificates.
+
+**First-time setup:**
+
+```bash
+./code-signing/generate-keystore.sh
+```
+
+This interactive script will:
+1. Prompt for certificate details (name, organization, etc.)
+2. Generate `code-signing/keystore.jks` (private key)
+3. Generate `code-signing/codesigning.pem` (certificate)
+4. Generate `code-signing/codesigning.p7b` (certificate chain)
+5. Generate `gradle.properties` (signing configuration)
+
+The signing files are gitignored - each developer generates their own.
+
+**Note:** Self-signed modules show a warning in Ignition when installing, but work normally.
+
+### Building
 
 Requires Java 17+:
 
@@ -19,7 +66,17 @@ Requires Java 17+:
 ./gradlew build
 ```
 
+If signing files are missing, the build will fail with instructions to run the setup script.
+
 Output: `build/Schema-Tag-Provider.modl`
+
+## Installation
+
+Use the Ignition Gateway settings page, navigate to Modules on the left. 
+
+Scroll to the bottom and click "Install or Upgrade a Module..."
+
+Browse to the signed .modl file generated during the build, and accept the self-signed certificate.
 
 ## Configuration
 
@@ -27,6 +84,8 @@ On first startup, a config file is created at:
 ```
 <Ignition Data Dir>/modules/schema-tag-provider/config.properties
 ```
+
+**Note:** on macOS `<IgnitionDataDir>` is /usr/local/ignition/data
 
 ### Configuration Options
 
@@ -48,7 +107,7 @@ On first startup, a config file is created at:
 
 Default values are defined in:
 ```
-gateway/src/main/java/com/theoremsystems/ignition/testtagprovider/gateway/config/ModuleSettings.java
+gateway/src/main/java/.../gateway/config/ModuleSettings.java
 ```
 
 ## Usage
