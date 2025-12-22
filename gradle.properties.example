@@ -1,0 +1,5 @@
+ignition.signing.certAlias=codesigning
+ignition.signing.keystorePassword=secretPassword
+ignition.signing.certFile=./code-signing/codesigning.p7b
+ignition.signing.certPassword=secretPassword
+ignition.signing.keystoreFile=./code-signing/keystore.jks
