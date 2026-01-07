@@ -1,0 +1,20 @@
+{
+    "title": "Sensor",
+    "type": "object",
+    "properties": {
+        "temperature": {
+            "type": "number",
+            "description": "Temperature in Celsius"
+        },
+        "humidity": {
+            "type": "number",
+            "description": "Relative humidity percentage"
+        },
+        "status": {
+            "type": "string"
+        },
+        "online": {
+            "type": "boolean"
+        }
+    }
+}
