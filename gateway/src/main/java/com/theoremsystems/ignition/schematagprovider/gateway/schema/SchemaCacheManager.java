@@ -25,6 +25,8 @@ public class SchemaCacheManager {
     private final JsonSchemaParser parser;
     private final Map<String, SchemaModel> schemaCache = new ConcurrentHashMap<>();
     private final Map<String, String> rawSchemaCache = new ConcurrentHashMap<>();
+    // Maps UDT name (from schema title) -> filename that defines it, for duplicate detection
+    private final Map<String, String> udtNameToFilename = new ConcurrentHashMap<>();
 
     public SchemaCacheManager(Path cacheDirectory) {
         this.cacheDirectory = cacheDirectory;
@@ -65,14 +67,32 @@ public class SchemaCacheManager {
 
     private void loadSchemaFile(Path file) throws IOException, JsonSchemaParser.JsonSchemaParseException {
         String filename = file.getFileName().toString();
-        String schemaName = filename.substring(0, filename.lastIndexOf('.'));
+        String fileBaseName = filename.substring(0, filename.lastIndexOf('.'));
         String content = Files.readString(file);
 
-        SchemaModel schema = parser.parse(schemaName, content);
-        schemaCache.put(schemaName, schema);
-        rawSchemaCache.put(schemaName, content);
+        SchemaModel schema = parser.parse(fileBaseName, content);
+        String udtName = schema.getName();
 
-        logger.debug("Loaded schema: {} from {}", schemaName, file);
+        // Check if filename differs from the schema title (UDT name)
+        if (!fileBaseName.equals(udtName)) {
+            logger.info("Loaded schema from '{}': UDT will be named '{}' (from schema title, not filename)",
+                    filename, udtName);
+        }
+
+        // Check for duplicate UDT names from different files
+        String existingFile = udtNameToFilename.get(udtName);
+        if (existingFile != null && !existingFile.equals(fileBaseName)) {
+            logger.warn("Duplicate UDT name '{}': file '{}' will overwrite UDT previously defined by '{}.json'. " +
+                    "Consider changing the 'title' field in one of these schemas.",
+                    udtName, filename, existingFile);
+        }
+
+        schemaCache.put(fileBaseName, schema);
+        rawSchemaCache.put(fileBaseName, content);
+        udtNameToFilename.put(udtName, fileBaseName);
+
+        logger.info("Loaded schema '{}' from {} ({} properties)",
+                udtName, filename, schema.getProperties().size());
     }
 
     /**
@@ -83,8 +103,25 @@ public class SchemaCacheManager {
      * @return The parsed SchemaModel
      */
     public SchemaModel saveSchema(String schemaName, String content) throws IOException, JsonSchemaParser.JsonSchemaParseException {
+        boolean isNew = !schemaCache.containsKey(schemaName);
+
         // Parse first to validate
         SchemaModel schema = parser.parse(schemaName, content);
+        String udtName = schema.getName();
+
+        // Check if schema name differs from the UDT name (title)
+        if (!schemaName.equals(udtName)) {
+            logger.info("Saving schema '{}': UDT will be named '{}' (from schema title)",
+                    schemaName, udtName);
+        }
+
+        // Check for duplicate UDT names from different sources
+        String existingSource = udtNameToFilename.get(udtName);
+        if (existingSource != null && !existingSource.equals(schemaName)) {
+            logger.warn("Duplicate UDT name '{}': schema '{}' will overwrite UDT previously defined by '{}'. " +
+                    "Consider changing the 'title' field in one of these schemas.",
+                    udtName, schemaName, existingSource);
+        }
 
         // Save to disk
         Path file = cacheDirectory.resolve(schemaName + ".json");
@@ -93,8 +130,10 @@ public class SchemaCacheManager {
         // Update caches
         schemaCache.put(schemaName, schema);
         rawSchemaCache.put(schemaName, content);
+        udtNameToFilename.put(udtName, schemaName);
 
-        logger.info("Saved schema: {} to {}", schemaName, file);
+        logger.info("{} schema '{}' ({} properties) to {}",
+                isNew ? "Saved new" : "Updated", udtName, schema.getProperties().size(), file.getFileName());
         return schema;
     }
 
@@ -106,6 +145,12 @@ public class SchemaCacheManager {
 
         if (Files.exists(file)) {
             Files.delete(file);
+        }
+
+        // Clean up the UDT name mapping
+        SchemaModel schema = schemaCache.get(schemaName);
+        if (schema != null) {
+            udtNameToFilename.remove(schema.getName());
         }
 
         schemaCache.remove(schemaName);
@@ -167,17 +212,31 @@ public class SchemaCacheManager {
 
         schemaCache.clear();
         rawSchemaCache.clear();
+        udtNameToFilename.clear();
         loadAllSchemas();
 
         // Determine which schemas were deleted
         Set<String> deletedSchemas = new HashSet<>(previousSchemas);
         deletedSchemas.removeAll(schemaCache.keySet());
 
-        if (!deletedSchemas.isEmpty()) {
-            logger.info("Detected {} deleted schemas: {}", deletedSchemas.size(), deletedSchemas);
+        // Determine which schemas are new
+        Set<String> newSchemas = new HashSet<>(schemaCache.keySet());
+        newSchemas.removeAll(previousSchemas);
+
+        if (!newSchemas.isEmpty()) {
+            logger.info("Detected {} new schema(s): {}", newSchemas.size(), newSchemas);
         }
 
-        logger.info("Reloaded {} schemas from cache", schemaCache.size());
+        if (!deletedSchemas.isEmpty()) {
+            logger.info("Detected {} deleted schema(s): {}", deletedSchemas.size(), deletedSchemas);
+        }
+
+        if (newSchemas.isEmpty() && deletedSchemas.isEmpty()) {
+            logger.debug("Cache reload complete, no changes ({} schemas)", schemaCache.size());
+        } else {
+            logger.info("Cache reload complete: {} total schemas", schemaCache.size());
+        }
+
         return deletedSchemas;
     }
 

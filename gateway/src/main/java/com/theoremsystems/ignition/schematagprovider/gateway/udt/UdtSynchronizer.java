@@ -44,22 +44,29 @@ public class UdtSynchronizer {
      * @return true if successful, false otherwise
      */
     public boolean syncUdtDefinition(SchemaModel schema) {
-        logger.info("Syncing UDT definition: {}", schema.getName());
+        boolean isNew = !registeredTypes.contains(schema.getName());
+        String action = isNew ? "Creating" : "Updating";
+        int nestedCount = countNestedObjects(schema);
+
+        logger.info("{} UDT '{}' ({} properties{})",
+                action, schema.getName(), schema.getProperties().size(),
+                nestedCount > 0 ? ", " + nestedCount + " nested types" : "");
 
         try {
             TagProvider provider = getTagProvider();
             if (provider == null) {
-                logger.error("Tag provider not found: {}", providerName);
+                logger.error("Cannot {} UDT '{}': tag provider '{}' not found",
+                        action.toLowerCase(), schema.getName(), providerName);
                 return false;
             }
 
             // First, import any nested UDT definitions
             String nestedJson = builder.buildNestedUdtDefinitions(schema);
             if (nestedJson != null) {
-                logger.debug("Importing nested UDT definitions for: {}", schema.getName());
+                logger.info("Importing {} nested UDT definition(s) for '{}'", nestedCount, schema.getName());
                 boolean nestedSuccess = importUdtJson(provider, nestedJson);
                 if (!nestedSuccess) {
-                    logger.warn("Failed to import nested UDTs for: {}", schema.getName());
+                    logger.warn("Failed to import nested UDTs for '{}', continuing with main UDT", schema.getName());
                 }
             }
 
@@ -69,17 +76,31 @@ public class UdtSynchronizer {
 
             if (success) {
                 registeredTypes.add(schema.getName());
-                logger.info("Successfully synced UDT: {}", schema.getName());
+                logger.info("Successfully {} UDT '{}' in tag provider '{}' at _types_/{}",
+                        isNew ? "created" : "updated", schema.getName(), providerName, schema.getName());
             } else {
-                logger.error("Failed to sync UDT: {}", schema.getName());
+                logger.error("Failed to {} UDT '{}': import returned error", action.toLowerCase(), schema.getName());
             }
 
             return success;
 
         } catch (Exception e) {
-            logger.error("Error syncing UDT definition: " + schema.getName(), e);
+            logger.error("Error {} UDT '{}': {}", action.toLowerCase(), schema.getName(), e.getMessage(), e);
             return false;
         }
+    }
+
+    /**
+     * Count the number of nested object properties in a schema.
+     */
+    private int countNestedObjects(SchemaModel schema) {
+        int count = 0;
+        for (var prop : schema.getProperties()) {
+            if (prop.isObject() && prop.hasNestedProperties()) {
+                count++;
+            }
+        }
+        return count;
     }
 
     /**

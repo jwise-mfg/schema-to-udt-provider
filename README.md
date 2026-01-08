@@ -168,9 +168,29 @@ The schema name is derived from the topic (e.g., `ignition/schemas/Sensor` → `
 
 ### Checking Logs
 
-View module logs in Gateway: Status > Logs
+The module logs to Ignition's built-in logging system.
 
-Search for "TagProviderManager" or "Schema Tag Provider" to see startup messages and schema processing.
+**Viewing logs in the Gateway web interface:**
+1. Navigate to Gateway → Status → Logs
+2. Filter by logger name: `SchemaCacheManager`, `UdtSynchronizer`, or `TagProviderManager`
+
+**Log files on disk:**
+```
+<Ignition Data Dir>/logs/wrapper.log
+```
+On macOS: `/usr/local/ignition/data/logs/wrapper.log`
+
+**Adjusting log levels:**
+1. Gateway → Configure → System → Logging → Loggers
+2. Add a logger for `com.theoremsystems.ignition.schematagprovider`
+3. Set the desired level (DEBUG, INFO, WARN, ERROR)
+
+**What gets logged:**
+- Schema detection: `Loaded schema 'Sensor' from Sensor.json (4 properties)`
+- New schemas: `Detected 1 new schema(s): [Pump]`
+- Deleted schemas: `Detected 2 deleted schema(s): [OldType]`
+- UDT creation: `Creating UDT 'Sensor' (4 properties, 1 nested types)`
+- UDT sync results: `Successfully created UDT 'Sensor' in tag provider 'default' at _types_/Sensor`
 
 ## JSON Schema to UDT Type Mapping
 

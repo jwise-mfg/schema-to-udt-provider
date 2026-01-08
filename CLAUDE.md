@@ -4,120 +4,103 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is an Ignition module for Inductive Automation's Ignition SCADA platform. It's a multi-scope module built with Gradle (Kotlin DSL) and the Ignition Module SDK.
+This is an Ignition module that creates UDT definitions from JSON Schema files, with MQTT-based schema updates. Built with Gradle (Kotlin DSL) and the Ignition Module SDK.
 
 - **SDK Version**: 8.1.20
-- **Java**: 11+
-- **Gradle**: 7.6
+- **Java**: 11+ (toolchain configured for 11)
 - **Build Plugin**: io.ia.sdk.modl v0.4.0
 
 ## Build Commands
 
-Requires Java 11+ to build (set JAVA_HOME or use sdkman):
-
+**First-time setup** (required before first build):
 ```bash
-export JAVA_HOME=~/.sdkman/candidates/java/17.0.13-tem  # if needed
-./gradlew build           # Build all modules into .modl file
+./code-signing/generate-keystore.sh
+```
+This generates the keystore, certificate files, and `gradle.properties` needed for module signing.
+
+**Build**:
+```bash
+./gradlew build           # Build .modl file
 ./gradlew clean build     # Clean and rebuild
 ```
 
-The build produces `build/Schema-Tag-Provider.modl` which can be installed in Ignition.
+Output: `build/Schema-Tag-Provider.modl`
 
 ## Architecture
 
 ### Module Scopes
 
-Ignition modules use scope designators to specify where code runs:
+This module is Gateway-only (scope `G`). Ignition modules use scope designators:
+- **G** - Gateway (server-side)
+- **C** - Vision Client
+- **D** - Designer
 
 | Subproject | Scope | Description |
 |------------|-------|-------------|
-| common     | GCD   | Shared code available in Gateway, Client, and Designer |
-| gateway    | G     | Server-side code running in the Gateway |
-| client     | CD    | Vision Client (also included in Designer for testing) |
-| designer   | D     | Designer IDE only |
+| common     | G     | Shared code (currently Gateway-only) |
+| gateway    | G     | Server-side code |
 
-### Hook Classes
+### Entry Point
 
-Each scope has a hook class that serves as the entry point:
+**SchemaTagProviderGatewayHook** (`gateway/`) - Extends `AbstractGatewayModuleHook`, handles module lifecycle
 
-- **TestTagProviderGatewayHook** (`gateway/`) - Extends `AbstractGatewayModuleHook`, handles server-side lifecycle
-- **TestTagProviderClientHook** (`client/`) - Extends `AbstractClientModuleHook`, handles Vision client lifecycle
-- **TestTagProviderDesignerHook** (`designer/`) - Extends `AbstractDesignerModuleHook`, handles Designer IDE lifecycle
-- **TestTagProviderModule** (`common/`) - Contains the module ID constant shared across all scopes
+**Module ID**: `com.theoremsystems.ignition.SchemaTagProvider`
 
-### Module ID
+### Data Flow
 
-The module is identified by: `com.theoremsystems.ignition.testtagprovider.TestTagProvider`
+```
+JSON Schema Input (File or MQTT)
+         ↓
+    SchemaCacheManager (caches to disk)
+         ↓
+    JsonSchemaParser → SchemaModel
+         ↓
+    UdtDefinitionBuilder (creates UDT JSON)
+         ↓
+    UdtSynchronizer (imports to TagProvider)
+         ↓
+    Ignition _types_ folder
+```
+
+### Key Components
+
+- **TagProviderManager** - Main coordinator, orchestrates all components
+- **SchemaCacheManager** - Local file cache, detects adds/updates/deletes
+- **MqttSchemaListener** - MQTT client subscribing to schema topics
+- **UdtSynchronizer** - Imports/removes UDT definitions via `TagProvider.importTagsAsync()`
 
 ## Dependencies
 
-All Ignition SDK dependencies use `compileOnly` scope since Ignition provides them at runtime. The SDK libraries come from Inductive Automation's Nexus repository (configured in the Gradle plugin).
+Ignition SDK dependencies use `compileOnly` (provided at runtime).
 
-**Important**: Third-party libraries that need to be bundled in the module must use `modlImplementation` (not `implementation` or `compileOnly`). This ensures they are packaged inside the `.modl` file and available at runtime.
-
-Example in `gateway/build.gradle.kts`:
+**Bundling third-party libraries**: Use `modlImplementation` (not `implementation`):
 ```kotlin
 modlImplementation("org.eclipse.paho:org.eclipse.paho.client.mqttv3:1.2.5")
 modlImplementation("com.google.code.gson:gson:2.9.0")
 ```
 
-## Gateway Module Structure
-
-The gateway module contains the main functionality:
-
-```
-gateway/src/main/java/.../gateway/
-├── TestTagProviderGatewayHook.java  # Module entry point
-├── TagProviderManager.java          # Main coordinator
-├── config/
-│   ├── ModuleSettings.java          # Configuration defaults
-│   └── ConfigLoader.java            # Properties file loader
-├── mqtt/
-│   ├── MqttSchemaListener.java      # MQTT client
-│   └── MqttConnectionConfig.java    # Connection settings
-├── schema/
-│   ├── SchemaCacheManager.java      # Local file cache
-│   ├── JsonSchemaParser.java        # JSON Schema parsing
-│   ├── SchemaModel.java             # Schema representation
-│   └── DataTypeMapper.java          # JSON type → Ignition type
-└── udt/
-    ├── UdtDefinitionBuilder.java    # Builds UDT JSON
-    └── UdtSynchronizer.java         # Imports to TagProvider
-```
-
 ## Configuration
 
-Config file location: `<Ignition Data Dir>/modules/Schema-Tag-provider/config.properties`
+Config file: `<Ignition Data Dir>/modules/schema-tag-provider/config.properties`
 
-Default values are in: `gateway/.../config/ModuleSettings.java`
+On macOS: `/usr/local/ignition/data/modules/schema-tag-provider/config.properties`
 
-Key configuration options:
-- `tag.provider.name` - Target tag provider (default: `default`)
-- `schema.cache.scan.interval.seconds` - Cache scan frequency (default: `30`, set to `0` to disable)
-- `tag.provider.allowdelete` - Whether to remove UDTs when schemas are deleted (default: `true`)
-- `mqtt.enabled` - Enable/disable MQTT listener (default: `true`)
+Defaults defined in: `gateway/.../config/ModuleSettings.java`
 
-**Important**: The module reads config on startup. If you add new properties to an existing config file, you must set them explicitly - defaults only apply when creating a new config file.
+**Important**: Defaults only apply when creating a new config file. Adding properties to an existing file requires setting them explicitly.
 
-## Testing the Module
+## Testing
 
-1. Place JSON Schema files in: `<Ignition Data Dir>/modules/Schema-Tag-provider/schemas/`
-2. Or publish to MQTT topic: `ignition/schemas/<SchemaName>`
-3. Check `_types_` folder in Tag Browser for created UDTs
-4. View logs: Gateway > Status > Logs (search for "TagProviderManager")
+No automated tests. Manual testing:
+1. Place JSON Schema files in: `<Ignition Data Dir>/modules/schema-tag-provider/schemas/`
+2. Or publish to MQTT: `mosquitto_pub -t "ignition/schemas/Sensor" -f Sensor.json`
+3. Check `_types_` folder in Tag Browser for UDTs
+4. Logs: Gateway > Status > Logs (search "TagProviderManager")
 
 ## Key Implementation Details
 
 ### Periodic Cache Scanning
-The module uses Ignition's `ExecutionManager.scheduleWithFixedDelay()` to periodically scan the cache directory for changes. The `SchemaCacheManager.reload()` method returns a set of deleted schema names by comparing schemas before and after reload.
-
-### Schema Deletion Flow
-1. `SchemaCacheManager.reload()` detects deleted schemas by comparing keysets
-2. `TagProviderManager.scanAndSyncCache()` checks `settings.isAllowDelete()`
-3. If allowed, calls `UdtSynchronizer.removeUdtDefinition()` for each deleted schema
-4. Same logic applies in `onSchemaDeleted()` for MQTT-triggered deletions
+Uses `ExecutionManager.scheduleWithFixedDelay()`. `SchemaCacheManager.reload()` returns deleted schema names by comparing keysets before/after reload.
 
 ### UDT Import/Remove
-Uses `TagProvider.importTagsAsync()` with appropriate `CollisionPolicy`:
-- Import: `CollisionPolicy.Overwrite` for updates
-- Remove: Deletes from `_types_/<SchemaName>` path
+Uses `TagProvider.importTagsAsync()` with `CollisionPolicy.Overwrite` for imports. Deletions (when `allowdelete=true`) remove from `_types_/<SchemaName>` path.
